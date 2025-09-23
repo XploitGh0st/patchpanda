@@ -1,4 +1,4 @@
-// Vulnerable Java Test Code for Patch Panda
+// Vulnerable Java Test Code for Patch Panda ...
 // DO NOT USE IN PRODUCTION!
 
 import java.sql.*;

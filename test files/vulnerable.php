@@ -20,7 +20,7 @@ function getUserData($user_id) {
     return $result->fetch_all();
 }
 
-// 3. CROSS-SITE SCRIPTING (XSS)
+// 3. CROSS-SITE SCRIPTING (XSS) ...
 if (isset($_GET['name'])) {
     $name = $_GET['name'];
     // VULNERABLE: Direct output without escaping

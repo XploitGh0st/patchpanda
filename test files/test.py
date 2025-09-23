@@ -170,7 +170,7 @@ def authenticate_user(username, password, is_admin=False):
         return True
     
     # Weak password check
-    if len(password) > 3:  # Too simple requirement
+    if len(password) > 3:  # Too simple requirement yrp
         return True
     
     return False

@@ -23,7 +23,7 @@ function getUserData(userId) {
         database: 'myapp'
     });
     
-    // VULNERABLE: String concatenation in SQL
+    // VULNERABLE: String concatenation in SQL ...
     const query = `SELECT * FROM users WHERE id = '${userId}'`;
     connection.query(query, (error, results) => {
         console.log(results);

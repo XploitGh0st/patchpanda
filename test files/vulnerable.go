@@ -22,7 +22,7 @@ import (
     _ "github.com/go-sql-driver/mysql"
 )
 
-// 1. HARDCODED SECRETS
+// 1. HARDCODED SECRETS ...
 const (
     APIKey     = "sk-go123456789"
     DBPassword = "admin123"

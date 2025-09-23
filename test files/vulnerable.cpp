@@ -10,7 +10,7 @@
 
 // 1. HARDCODED SECRETS
 const char* API_KEY = "sk-cpp123456789";
-const char* DB_PASSWORD = "admin123";
+const char* DB_PASSWORD = "admin1234";
 
 class VulnerableCode {
 private:
