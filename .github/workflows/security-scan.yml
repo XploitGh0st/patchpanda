@@ -1,0 +1,53 @@
+name: 🛡️ Patch Panda Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    
+    steps:
+    - name: 🔍 Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2  # Fetch at least 2 commits for diff comparison
+    
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install google-generativeai requests
+    
+    - name: 🛡️ Run Patch Panda Security Scan
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_SHA: ${{ github.sha }}
+        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        REPORT_EMAIL_FROM: ${{ secrets.REPORT_EMAIL_FROM }}
+        REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
+      run: python scan.py
+    
+    - name: 📊 Upload scan results as artifact
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-scan-results
+        path: |
+          *.log
+          *.json
+        retention-days: 30
