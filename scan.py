@@ -16,8 +16,53 @@ import requests
 
 
 # --- Environment Variables ---
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+GEMINI_API_KEY = os.getenv('GEMINI_A    # Summarize results
+    actual_vulnerabilities = [v for v in vulnerabilities_found if v.get('is_vulnerability', True)]
+    errors_found = [v for v in vulnerabilities_found if not v.get('is_vulnerability', True)]
+    
+    print(f"\n📊 SCAN SUMMARY:")
+    print(f"📁 Files scanned: {len(changed_files)}")
+    print(f"🚨 Vulnerabilities found: {len(actual_vulnerabilities)}")
+    print(f"❌ Analysis errors: {len(errors_found)}")
+    print(f"⚠️ File reading errors: {len(analysis_errors)}")
+    
+    # Display detailed summary in GitHub Actions logs
+    if actual_vulnerabilities:
+        print("\n" + "="*100)
+        print("🚨 SECURITY VULNERABILITIES SUMMARY")
+        print("="*100)
+        for i, vuln in enumerate(actual_vulnerabilities, 1):
+            print(f"\n🔍 Vulnerability #{i} in: {vuln['file']}")
+            print("-" * 60)
+            # Extract just the vulnerability details from markdown (remove header)
+            vuln_details = vuln['markdown'].split('\n\n', 1)[1] if '\n\n' in vuln['markdown'] else vuln['markdown']
+            print(vuln_details.replace('---\n', '').strip())
+            print("-" * 60)
+        print("="*100)
+        print(f"🚨 TOTAL SECURITY ISSUES FOUND: {len(actual_vulnerabilities)}")
+        print("="*100)
+        print()
+    
+    if errors_found:
+        print("\n" + "="*80)
+        print("⚠️ ANALYSIS ERRORS SUMMARY")
+        print("="*80)
+        for i, error in enumerate(errors_found, 1):
+            print(f"\n❌ Error #{i} in: {error['file']}")
+            print("-" * 50)
+            error_details = error['markdown'].split('\n\n', 1)[1] if '\n\n' in error['markdown'] else error['markdown']
+            print(error_details.replace('---\n', '').strip())
+            print("-" * 50)
+        print("="*80)
+        print()
+    
+    # Generate and send reports if we have results (vulnerabilities or errors)
+    if vulnerabilities_found:
+        print(f"\n📝 Generating reports...")
+        
+        # Count actual vulnerabilities vs errors
+        vuln_count = len(actual_vulnerabilities)
+        error_count = len(errors_found)TOKEN = os.getenv('GITHUB_TOKEN')
 GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 GITHUB_SHA = os.getenv('GITHUB_SHA')
 GMAIL_APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
@@ -412,6 +457,17 @@ if __name__ == "__main__":
             if not is_error and not has_no_issues:
                 print(f"🚨 Vulnerabilities detected in {file_path}")
                 
+                # GitHub Actions annotation for security issue
+                print(f"::warning file={file_path}::🚨 Security vulnerabilities detected in this file")
+                
+                # Display vulnerabilities in GitHub Actions logs
+                print("="*80)
+                print(f"🚨 SECURITY VULNERABILITIES FOUND IN: {file_path}")
+                print("="*80)
+                print(analysis_result)
+                print("="*80)
+                print()
+                
                 # Format for Markdown (GitHub comment)
                 markdown_report = f"""
 ## 🚨 Security Issues Found in `{file_path}`
@@ -437,6 +493,17 @@ if __name__ == "__main__":
             elif is_error:
                 print(f"❌ Analysis failed for {file_path}: {analysis_result}")
                 analysis_errors.append(file_path)
+                
+                # GitHub Actions annotation for analysis error
+                print(f"::error file={file_path}::❌ Failed to analyze file for security issues")
+                
+                # Display errors in GitHub Actions logs
+                print("="*60)
+                print(f"❌ ANALYSIS ERROR IN: {file_path}")
+                print("="*60)
+                print(analysis_result)
+                print("="*60)
+                print()
                 
                 # Add error report
                 error_report = f"""
@@ -592,6 +659,15 @@ if __name__ == "__main__":
     print(f"   📁 Files scanned: {len(changed_files)}")
     print(f"   🚨 Security issues: {len(actual_vulnerabilities) if 'actual_vulnerabilities' in locals() else 0}")
     print(f"   ❌ Analysis errors: {len(analysis_errors)}")
+    
+    # GitHub Actions summary annotations
+    if 'actual_vulnerabilities' in locals():
+        vuln_count = len(actual_vulnerabilities)
+        if vuln_count > 0:
+            print(f"::notice title=Patch Panda Security Scan::🚨 Found {vuln_count} security vulnerabilities across {len(changed_files)} files")
+            print(f"::warning::🚨 SECURITY ALERT: {vuln_count} vulnerabilities detected! Check the scan results above.")
+        else:
+            print(f"::notice title=Patch Panda Security Scan::✅ No security vulnerabilities detected in {len(changed_files)} files")
     
     # Exit with appropriate code
     if 'actual_vulnerabilities' in locals() and len(actual_vulnerabilities) > 0:
