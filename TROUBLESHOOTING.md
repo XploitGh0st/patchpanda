@@ -2,6 +2,25 @@
 
 ## Common Issues and Solutions
 
+### ❌ "Invalid workflow file" / YAML Syntax Errors
+
+This error occurs when the GitHub Actions workflow file has syntax issues.
+
+#### **Root Causes:**
+1. **Corrupted YAML structure**: File editing errors that break YAML formatting
+2. **Indentation issues**: YAML is sensitive to spaces and tabs
+3. **Missing colons or brackets**: Required YAML syntax elements
+4. **Encoding problems**: Non-UTF8 characters in the file
+
+#### **Quick Fix:**
+✅ The workflow file has been repaired with correct YAML syntax
+✅ Use the included `validate_yaml.py` script to check syntax before committing
+
+#### **Prevention:**
+- Always validate YAML files before committing
+- Use a YAML-aware editor with syntax highlighting
+- Be careful when copy-pasting workflow configurations
+
 ### ❌ "Error occurred during analysis"
 
 This error indicates problems with the Gemini API call. Here are the fixes applied:

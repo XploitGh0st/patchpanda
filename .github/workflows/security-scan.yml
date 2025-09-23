@@ -1,20 +1,7 @@
-name: 🛡️ Patch Panda Security Sc    - name: 🛡️ Run Patch Panda Security Scan
-      env:
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        GITHUB_SHA: ${{ github.sha }}
-        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        REPORT_EMAIL_FROM: ${{ secrets.REPORT_EMAIL_FROM }}
-        REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
-      run: |
-        echo "🔍 Starting Patch Panda Security Scan..."
-        echo "📊 Repository: $GITHUB_REPOSITORY"
-        echo "📝 Commit: $GITHUB_SHA"
-        echo "----------------------------------------"
-        python scan.py
-        echo "----------------------------------------"
-        echo "✅ Scan completed successfully!"push:
+name: 🛡️ Patch Panda Security Scan
+
+on:
+  push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
@@ -54,6 +41,10 @@ jobs:
         REPORT_EMAIL_FROM: ${{ secrets.REPORT_EMAIL_FROM }}
         REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
       run: |
-        echo "� Starting Patch Panda Security Scan..."
+        echo "🔍 Starting Patch Panda Security Scan..."
+        echo "📊 Repository: $GITHUB_REPOSITORY"
+        echo "📝 Commit: $GITHUB_SHA"
+        echo "----------------------------------------"
         python scan.py
+        echo "----------------------------------------"
         echo "✅ Scan completed successfully!"
