@@ -63,20 +63,34 @@ def get_changed_files():
         return []
 
 
-def analyze_code_with_gemini(file_content):
+def analyze_code_with_gemini(file_content, file_path=""):
     """
     Send code to the Gemini Pro API and get a language-agnostic security analysis.
     
     Args:
         file_content (str): The content of the code file to analyze
+        file_path (str): Path of the file being analyzed (for context)
         
     Returns:
         str: Analysis result from Gemini API
     """
     try:
+        # Validate API key
+        if not GEMINI_API_KEY:
+            print("❌ Error: GEMINI_API_KEY is not set")
+            return "Error: GEMINI_API_KEY not configured"
+        
         # Configure Gemini client
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-pro')
+        
+        # Truncate very large files to avoid token limits
+        max_content_length = 30000  # Approximate token limit
+        if len(file_content) > max_content_length:
+            print(f"⚠️ Warning: File {file_path} is large ({len(file_content)} chars), truncating...")
+            file_content = file_content[:max_content_length] + "\n\n... [File truncated for analysis] ..."
+        
+        # Use the newer model name
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         # Create the analysis prompt
         prompt = f"""You are a senior cybersecurity expert specializing in multi-language code review.
@@ -103,13 +117,71 @@ If the code appears to be secure and you find no vulnerabilities, you MUST respo
 Code to analyze:
 {file_content}"""
         
-        # Generate content using Gemini
-        response = model.generate_content(prompt)
-        return response.text
+        # Configure generation parameters for better reliability
+        generation_config = genai.types.GenerationConfig(
+            temperature=0.1,  # Low temperature for consistent results
+            max_output_tokens=2048,
+            top_p=0.8,
+            top_k=40
+        )
+        
+        # Generate content using Gemini with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = model.generate_content(
+                    prompt,
+                    generation_config=generation_config,
+                    safety_settings=[
+                        {
+                            "category": "HARM_CATEGORY_HARASSMENT",
+                            "threshold": "BLOCK_NONE"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_HATE_SPEECH",
+                            "threshold": "BLOCK_NONE"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            "threshold": "BLOCK_NONE"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                            "threshold": "BLOCK_NONE"
+                        }
+                    ]
+                )
+                
+                if response.text:
+                    return response.text
+                else:
+                    print(f"⚠️ Warning: Empty response from Gemini for {file_path}")
+                    return "No issues found."
+                    
+            except Exception as retry_error:
+                print(f"🔄 Attempt {attempt + 1} failed for {file_path}: {retry_error}")
+                if attempt == max_retries - 1:
+                    raise retry_error
+                
+                # Wait before retry (exponential backoff)
+                import time
+                time.sleep(2 ** attempt)
+        
+        return "Error occurred during analysis"
     
     except Exception as e:
-        print(f"Error analyzing code with Gemini: {e}")
-        return "Error occurred during analysis"
+        error_msg = str(e)
+        print(f"❌ Error analyzing {file_path} with Gemini: {error_msg}")
+        
+        # Provide more specific error handling
+        if "API key" in error_msg.lower():
+            return "Error: Invalid or missing API key"
+        elif "quota" in error_msg.lower() or "rate" in error_msg.lower():
+            return "Error: API rate limit exceeded"
+        elif "token" in error_msg.lower():
+            return "Error: Content too large for analysis"
+        else:
+            return f"Error occurred during analysis: {error_msg}"
 
 
 def post_comment_on_commit(comment_body):
@@ -197,10 +269,25 @@ if __name__ == "__main__":
     # Validate required environment variables
     if not GEMINI_API_KEY:
         print("❌ Error: GEMINI_API_KEY environment variable is required")
+        print("💡 Get your API key from: https://makersuite.google.com/app/apikey")
         exit(1)
     
     if not all([GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SHA]):
         print("❌ Error: GitHub environment variables (GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SHA) are required")
+        print("💡 These are automatically provided by GitHub Actions")
+        exit(1)
+    
+    # Test Gemini API connection
+    print("🔌 Testing Gemini API connection...")
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        test_response = model.generate_content("Hello, this is a test.")
+        print("✅ Gemini API connection successful")
+    except Exception as e:
+        print(f"❌ Gemini API connection failed: {e}")
+        print("💡 Check your API key and internet connection")
         exit(1)
     
     # Get changed files
@@ -208,16 +295,44 @@ if __name__ == "__main__":
     
     if not changed_files:
         print("ℹ️ No source code files were changed in this commit.")
+        
+        # Post a neutral comment
+        neutral_comment = f"""# 🛡️ Patch Panda Security Scan Report
+
+**Commit:** `{GITHUB_SHA[:8]}`
+**Repository:** `{GITHUB_REPOSITORY}`
+
+ℹ️ **No source code files detected** in this commit. 
+
+*Patch Panda only scans files with the following extensions:*
+`.py`, `.js`, `.ts`, `.java`, `.cs`, `.go`, `.rb`, `.php`, `.rs`, `.c`, `.cpp`, `.h`, `.html`, `.css`
+
+---
+*🐼 Report generated by **Patch Panda** Security Scanner*
+"""
+        post_comment_on_commit(neutral_comment)
         exit(0)
     
     print(f"📁 Found {len(changed_files)} changed source code file(s): {', '.join(changed_files)}")
     
     # Initialize vulnerabilities list
     vulnerabilities_found = []
+    analysis_errors = []
     
     # Analyze each changed file
     for file_path in changed_files:
         try:
+            # Check if file exists
+            if not os.path.exists(file_path):
+                print(f"⚠️ Warning: File {file_path} not found (may have been deleted)")
+                continue
+            
+            # Check file size
+            file_size = os.path.getsize(file_path)
+            if file_size > 1000000:  # 1MB limit
+                print(f"⚠️ Warning: File {file_path} is too large ({file_size} bytes), skipping")
+                continue
+            
             # Read file content
             print(f"🔍 Scanning file: {file_path}")
             
@@ -233,13 +348,20 @@ if __name__ == "__main__":
             
             if file_content is None:
                 print(f"⚠️ Warning: Could not read file {file_path} with any encoding")
+                analysis_errors.append(file_path)
+                continue
+            
+            # Skip empty files
+            if not file_content.strip():
+                print(f"ℹ️ Skipping empty file: {file_path}")
                 continue
             
             # Analyze with Gemini
-            analysis_result = analyze_code_with_gemini(file_content)
+            analysis_result = analyze_code_with_gemini(file_content, file_path)
             
-            # Check if vulnerabilities were found
-            if "No issues found." not in analysis_result:
+            # Check if vulnerabilities were found (improved error detection)
+            if ("No issues found." not in analysis_result and 
+                not analysis_result.startswith("Error")):
                 print(f"🚨 Vulnerabilities detected in {file_path}")
                 
                 # Format for Markdown (GitHub comment)
@@ -254,7 +376,7 @@ if __name__ == "__main__":
                 # Format for HTML (Email)
                 html_report = f"""
 <h3>🚨 Security Issues Found in <code>{file_path}</code></h3>
-<pre>{analysis_result}</pre>
+<pre style="white-space: pre-wrap; background-color: #f8f8f8; padding: 10px; border-radius: 5px;">{analysis_result}</pre>
 <hr>
 """
                 
@@ -262,6 +384,32 @@ if __name__ == "__main__":
                     'file': file_path,
                     'markdown': markdown_report,
                     'html': html_report
+                })
+            elif analysis_result.startswith("Error"):
+                print(f"❌ Analysis failed for {file_path}: {analysis_result}")
+                
+                # Add error report
+                error_report = f"""
+## ⚠️ Analysis Error in `{file_path}`
+
+{analysis_result}
+
+**Recommendation**: Check file encoding, size, or API connectivity.
+
+---
+"""
+                
+                html_error_report = f"""
+<h3>⚠️ Analysis Error in <code>{file_path}</code></h3>
+<p style="color: #ff6b6b; background-color: #fff5f5; padding: 10px; border-radius: 5px;">{analysis_result}</p>
+<p><strong>Recommendation:</strong> Check file encoding, size, or API connectivity.</p>
+<hr>
+"""
+                
+                vulnerabilities_found.append({
+                    'file': file_path,
+                    'markdown': error_report,
+                    'html': html_error_report
                 })
             else:
                 print(f"✅ No issues found in {file_path}")
