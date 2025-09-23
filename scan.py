@@ -16,53 +16,8 @@ import requests
 
 
 # --- Environment Variables ---
-GEMINI_API_KEY = os.getenv('GEMINI_A    # Summarize results
-    actual_vulnerabilities = [v for v in vulnerabilities_found if v.get('is_vulnerability', True)]
-    errors_found = [v for v in vulnerabilities_found if not v.get('is_vulnerability', True)]
-    
-    print(f"\n📊 SCAN SUMMARY:")
-    print(f"📁 Files scanned: {len(changed_files)}")
-    print(f"🚨 Vulnerabilities found: {len(actual_vulnerabilities)}")
-    print(f"❌ Analysis errors: {len(errors_found)}")
-    print(f"⚠️ File reading errors: {len(analysis_errors)}")
-    
-    # Display detailed summary in GitHub Actions logs
-    if actual_vulnerabilities:
-        print("\n" + "="*100)
-        print("🚨 SECURITY VULNERABILITIES SUMMARY")
-        print("="*100)
-        for i, vuln in enumerate(actual_vulnerabilities, 1):
-            print(f"\n🔍 Vulnerability #{i} in: {vuln['file']}")
-            print("-" * 60)
-            # Extract just the vulnerability details from markdown (remove header)
-            vuln_details = vuln['markdown'].split('\n\n', 1)[1] if '\n\n' in vuln['markdown'] else vuln['markdown']
-            print(vuln_details.replace('---\n', '').strip())
-            print("-" * 60)
-        print("="*100)
-        print(f"🚨 TOTAL SECURITY ISSUES FOUND: {len(actual_vulnerabilities)}")
-        print("="*100)
-        print()
-    
-    if errors_found:
-        print("\n" + "="*80)
-        print("⚠️ ANALYSIS ERRORS SUMMARY")
-        print("="*80)
-        for i, error in enumerate(errors_found, 1):
-            print(f"\n❌ Error #{i} in: {error['file']}")
-            print("-" * 50)
-            error_details = error['markdown'].split('\n\n', 1)[1] if '\n\n' in error['markdown'] else error['markdown']
-            print(error_details.replace('---\n', '').strip())
-            print("-" * 50)
-        print("="*80)
-        print()
-    
-    # Generate and send reports if we have results (vulnerabilities or errors)
-    if vulnerabilities_found:
-        print(f"\n📝 Generating reports...")
-        
-        # Count actual vulnerabilities vs errors
-        vuln_count = len(actual_vulnerabilities)
-        error_count = len(errors_found)TOKEN = os.getenv('GITHUB_TOKEN')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 GITHUB_SHA = os.getenv('GITHUB_SHA')
 GMAIL_APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
@@ -545,9 +500,39 @@ if __name__ == "__main__":
     print(f"❌ Analysis errors: {len(errors_found)}")
     print(f"⚠️ File reading errors: {len(analysis_errors)}")
     
+    # Display detailed summary in GitHub Actions logs
+    if actual_vulnerabilities:
+        print("\n" + "="*100)
+        print("🚨 SECURITY VULNERABILITIES SUMMARY")
+        print("="*100)
+        for i, vuln in enumerate(actual_vulnerabilities, 1):
+            print(f"\n🔍 Vulnerability #{i} in: {vuln['file']}")
+            print("-" * 60)
+            # Extract just the vulnerability details from markdown (remove header)
+            vuln_details = vuln['markdown'].split('\n\n', 1)[1] if '\n\n' in vuln['markdown'] else vuln['markdown']
+            print(vuln_details.replace('---\n', '').strip())
+            print("-" * 60)
+        print("="*100)
+        print(f"🚨 TOTAL SECURITY ISSUES FOUND: {len(actual_vulnerabilities)}")
+        print("="*100)
+        print()
+    
+    if errors_found:
+        print("\n" + "="*80)
+        print("⚠️ ANALYSIS ERRORS SUMMARY")
+        print("="*80)
+        for i, error in enumerate(errors_found, 1):
+            print(f"\n❌ Error #{i} in: {error['file']}")
+            print("-" * 50)
+            error_details = error['markdown'].split('\n\n', 1)[1] if '\n\n' in error['markdown'] else error['markdown']
+            print(error_details.replace('---\n', '').strip())
+            print("-" * 50)
+        print("="*80)
+        print()
+    
     # Generate and send reports if we have results (vulnerabilities or errors)
     if vulnerabilities_found:
-        print(f"\n� Generating reports...")
+        print(f"\n📝 Generating reports...")
         
         # Count actual vulnerabilities vs errors
         vuln_count = len(actual_vulnerabilities)
@@ -603,7 +588,7 @@ if __name__ == "__main__":
             </ul>
         </div>
         
-        <h2>� Detailed Results</h2>
+        <h2>🔍 Detailed Results</h2>
 """
         
         # Add individual vulnerability reports
@@ -676,5 +661,3 @@ if __name__ == "__main__":
         # exit(1)
     else:
         print("🎉 No security vulnerabilities detected!")
-
-#hello
