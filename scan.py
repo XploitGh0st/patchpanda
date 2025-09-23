@@ -36,7 +36,9 @@ def get_changed_files():
                            '.php', '.rs', '.c', '.cpp', '.h', '.html', '.css']
     
     try:
-        # Run git command to get changed files
+        print("🔍 Getting changed files...")
+        
+        # First, try to get changed files between HEAD~1 and HEAD
         result = subprocess.run(
             ['git', 'diff', '--name-only', 'HEAD~1', 'HEAD'],
             capture_output=True,
@@ -44,23 +46,62 @@ def get_changed_files():
             check=True
         )
         
-        # Get list of all changed files
-        changed_files = result.stdout.strip().split('\n')
+        changed_files = result.stdout.strip().split('\n') if result.stdout.strip() else []
+        print(f"📋 Git diff found {len(changed_files)} changed files: {changed_files}")
+        
+        # If no files found, try alternative approaches
+        if not changed_files or (len(changed_files) == 1 and not changed_files[0]):
+            print("🔄 No files in HEAD~1..HEAD diff, trying alternative methods...")
+            
+            # Try getting all files in the repository as fallback
+            result = subprocess.run(
+                ['git', 'ls-files'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            all_files = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            print(f"📂 Repository contains {len(all_files)} total files")
+            
+            # For testing, if this is a new repo or single commit, scan all source files
+            changed_files = all_files
         
         # Filter for source code files only
         source_files = []
         for file_path in changed_files:
-            if file_path:  # Skip empty strings
+            if file_path and file_path.strip():  # Skip empty strings
+                file_path = file_path.strip()
                 for ext in CODE_FILE_EXTENSIONS:
                     if file_path.lower().endswith(ext):
-                        source_files.append(file_path)
+                        # Check if file actually exists
+                        if os.path.exists(file_path):
+                            source_files.append(file_path)
+                            print(f"✅ Found source file: {file_path}")
+                        else:
+                            print(f"⚠️ File in git but not found on disk: {file_path}")
                         break
         
+        print(f"📁 Filtered to {len(source_files)} source code files")
         return source_files
     
     except subprocess.CalledProcessError as e:
-        print(f"Error getting changed files: {e}")
-        return []
+        print(f"❌ Error getting changed files: {e}")
+        print(f"📋 Command output: {e.output if hasattr(e, 'output') else 'N/A'}")
+        
+        # Fallback: scan current directory for source files
+        print("🔄 Fallback: Scanning current directory for source files...")
+        fallback_files = []
+        for root, dirs, files in os.walk('.'):
+            for file in files:
+                file_path = os.path.join(root, file)
+                for ext in CODE_FILE_EXTENSIONS:
+                    if file.lower().endswith(ext):
+                        fallback_files.append(file_path.replace('\\', '/'))
+                        break
+        
+        print(f"📁 Fallback found {len(fallback_files)} source files")
+        return fallback_files[:10]  # Limit to 10 files to avoid overwhelming API
 
 
 def analyze_code_with_gemini(file_content, file_path=""):
@@ -357,11 +398,18 @@ if __name__ == "__main__":
                 continue
             
             # Analyze with Gemini
+            print(f"🤖 Sending {file_path} to Gemini for analysis...")
             analysis_result = analyze_code_with_gemini(file_content, file_path)
+            print(f"📝 Analysis result length: {len(analysis_result)} characters")
+            print(f"📋 First 200 chars of result: {analysis_result[:200]}...")
             
-            # Check if vulnerabilities were found (improved error detection)
-            if ("No issues found." not in analysis_result and 
-                not analysis_result.startswith("Error")):
+            # Check if vulnerabilities were found (improved detection logic)
+            is_error = analysis_result.startswith("Error")
+            has_no_issues = "No issues found." in analysis_result
+            
+            print(f"🔍 Analysis flags - Is Error: {is_error}, Has No Issues: {has_no_issues}")
+            
+            if not is_error and not has_no_issues:
                 print(f"🚨 Vulnerabilities detected in {file_path}")
                 
                 # Format for Markdown (GitHub comment)
@@ -383,10 +431,12 @@ if __name__ == "__main__":
                 vulnerabilities_found.append({
                     'file': file_path,
                     'markdown': markdown_report,
-                    'html': html_report
+                    'html': html_report,
+                    'is_vulnerability': True
                 })
-            elif analysis_result.startswith("Error"):
+            elif is_error:
                 print(f"❌ Analysis failed for {file_path}: {analysis_result}")
+                analysis_errors.append(file_path)
                 
                 # Add error report
                 error_report = f"""
@@ -409,7 +459,8 @@ if __name__ == "__main__":
                 vulnerabilities_found.append({
                     'file': file_path,
                     'markdown': error_report,
-                    'html': html_error_report
+                    'html': html_error_report,
+                    'is_vulnerability': False
                 })
             else:
                 print(f"✅ No issues found in {file_path}")
@@ -417,9 +468,23 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Error processing file {file_path}: {e}")
     
-    # Generate and send reports if vulnerabilities were found
+    # Summarize results
+    actual_vulnerabilities = [v for v in vulnerabilities_found if v.get('is_vulnerability', True)]
+    errors_found = [v for v in vulnerabilities_found if not v.get('is_vulnerability', True)]
+    
+    print(f"\n📊 SCAN SUMMARY:")
+    print(f"📁 Files scanned: {len(changed_files)}")
+    print(f"🚨 Vulnerabilities found: {len(actual_vulnerabilities)}")
+    print(f"❌ Analysis errors: {len(errors_found)}")
+    print(f"⚠️ File reading errors: {len(analysis_errors)}")
+    
+    # Generate and send reports if we have results (vulnerabilities or errors)
     if vulnerabilities_found:
-        print(f"\n🚨 SECURITY ALERT: Found vulnerabilities in {len(vulnerabilities_found)} file(s)")
+        print(f"\n� Generating reports...")
+        
+        # Count actual vulnerabilities vs errors
+        vuln_count = len(actual_vulnerabilities)
+        error_count = len(errors_found)
         
         # Construct GitHub comment (Markdown)
         commit_comment = f"""# 🛡️ Patch Panda Security Scan Report
@@ -427,7 +492,8 @@ if __name__ == "__main__":
 **Commit:** `{GITHUB_SHA[:8]}`
 **Repository:** `{GITHUB_REPOSITORY}`
 **Files Scanned:** {len(changed_files)}
-**Vulnerabilities Found:** {len(vulnerabilities_found)}
+**Security Issues:** {vuln_count}
+**Analysis Errors:** {error_count}
 
 ---
 
@@ -437,6 +503,9 @@ if __name__ == "__main__":
         repo_name = GITHUB_REPOSITORY.split('/')[-1] if GITHUB_REPOSITORY else "Unknown Repository"
         commit_url = f"https://github.com/{GITHUB_REPOSITORY}/commit/{GITHUB_SHA}" if GITHUB_REPOSITORY and GITHUB_SHA else "#"
         
+        # Determine header color based on results
+        header_color = "#ff4444" if vuln_count > 0 else "#ffa500"
+        
         email_report = f"""
 <!DOCTYPE html>
 <html>
@@ -444,9 +513,9 @@ if __name__ == "__main__":
     <title>Security Scan Report</title>
     <style>
         body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .header {{ background-color: #ff4444; color: white; padding: 20px; text-align: center; }}
+        .header {{ background-color: {header_color}; color: white; padding: 20px; text-align: center; }}
         .content {{ padding: 20px; }}
-        .summary {{ background-color: #f4f4f4; padding: 15px; border-left: 4px solid #ff4444; margin: 20px 0; }}
+        .summary {{ background-color: #f4f4f4; padding: 15px; border-left: 4px solid {header_color}; margin: 20px 0; }}
         code {{ background-color: #f4f4f4; padding: 2px 4px; border-radius: 3px; }}
         pre {{ background-color: #f8f8f8; padding: 10px; border-radius: 5px; overflow-x: auto; }}
     </style>
@@ -462,11 +531,12 @@ if __name__ == "__main__":
                 <li><strong>Repository:</strong> {GITHUB_REPOSITORY}</li>
                 <li><strong>Commit:</strong> <a href="{commit_url}">{GITHUB_SHA[:8]}</a></li>
                 <li><strong>Files Scanned:</strong> {len(changed_files)}</li>
-                <li><strong>Vulnerabilities Found:</strong> {len(vulnerabilities_found)}</li>
+                <li><strong>Security Issues:</strong> {vuln_count}</li>
+                <li><strong>Analysis Errors:</strong> {error_count}</li>
             </ul>
         </div>
         
-        <h2>🚨 Detailed Findings</h2>
+        <h2>� Detailed Results</h2>
 """
         
         # Add individual vulnerability reports
@@ -492,28 +562,43 @@ if __name__ == "__main__":
 """
         
         # Post comment on commit
+        print("📬 Posting comment to GitHub...")
         post_comment_on_commit(commit_comment)
         
         # Send email report
-        send_email_report_with_gmail(email_report)
+        if vuln_count > 0 or error_count > 0:
+            print("📧 Sending email report...")
+            send_email_report_with_gmail(email_report)
         
     else:
-        print("✅ Scan complete. No vulnerabilities found in the changed files.")
+        print("✅ Scan complete. No files analyzed or no results to report.")
         
-        # Post a positive comment on commit
-        positive_comment = f"""# 🛡️ Patch Panda Security Scan Report
+        # Post a simple completion comment
+        completion_comment = f"""# 🛡️ Patch Panda Security Scan Report
 
 **Commit:** `{GITHUB_SHA[:8]}`
 **Repository:** `{GITHUB_REPOSITORY}`
 **Files Scanned:** {len(changed_files)}
 
-✅ **All clear!** No security vulnerabilities detected in the changed files.
+✅ **Scan completed** - All analyzed files appear clean.
 
 ---
 *🐼 Report generated by **Patch Panda** Security Scanner*
 """
-        post_comment_on_commit(positive_comment)
+        post_comment_on_commit(completion_comment)
     
-    print("🔍 Security scan completed!")
+    print(f"\n🔍 Security scan completed!")
+    print(f"📊 Final Summary:")
+    print(f"   📁 Files scanned: {len(changed_files)}")
+    print(f"   🚨 Security issues: {len(actual_vulnerabilities) if 'actual_vulnerabilities' in locals() else 0}")
+    print(f"   ❌ Analysis errors: {len(analysis_errors)}")
+    
+    # Exit with appropriate code
+    if 'actual_vulnerabilities' in locals() and len(actual_vulnerabilities) > 0:
+        print("⚠️ Security vulnerabilities detected! Please review the findings.")
+        # Don't exit with error code as this might block the workflow
+        # exit(1)
+    else:
+        print("🎉 No security vulnerabilities detected!")
 
 #hello

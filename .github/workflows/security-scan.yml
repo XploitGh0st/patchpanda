@@ -40,14 +40,7 @@ jobs:
         GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         REPORT_EMAIL_FROM: ${{ secrets.REPORT_EMAIL_FROM }}
         REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
-      run: python scan.py
-    
-    - name: 📊 Upload scan results as artifact
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: security-scan-results
-        path: |
-          *.log
-          *.json
-        retention-days: 30
+      run: |
+        echo "� Starting Patch Panda Security Scan..."
+        python scan.py
+        echo "✅ Scan completed successfully!"
