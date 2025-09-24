@@ -15,6 +15,8 @@ import google.generativeai as genai
 import requests
 from datetime import datetime
 import json
+# Try to import reportlab, install if missing
+REPORTLAB_AVAILABLE = False
 try:
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
@@ -23,9 +25,29 @@ try:
     from reportlab.lib.colors import HexColor, black, red, orange, yellow, green
     from reportlab.lib import colors
     REPORTLAB_AVAILABLE = True
+    print("✅ ReportLab loaded successfully")
 except ImportError:
-    REPORTLAB_AVAILABLE = False
-    print("⚠️ Warning: reportlab not installed. PDF generation will be skipped...")
+    print("⚠️ ReportLab not found. Attempting to install...")
+    try:
+        import subprocess
+        import sys
+        result = subprocess.run([sys.executable, '-m', 'pip', 'install', 'reportlab>=4.0.0'], 
+                              capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            print("✅ ReportLab installed successfully, importing...")
+            from reportlab.lib.pagesizes import letter, A4
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            from reportlab.lib.colors import HexColor, black, red, orange, yellow, green
+            from reportlab.lib import colors
+            REPORTLAB_AVAILABLE = True
+        else:
+            print(f"❌ Failed to install ReportLab: {result.stderr}")
+            REPORTLAB_AVAILABLE = False
+    except Exception as e:
+        print(f"❌ Error installing ReportLab: {e}")
+        REPORTLAB_AVAILABLE = False
 
 
 # --- Environment Variables ---
@@ -302,36 +324,106 @@ Code to analyze:
 
 def post_comment_on_commit(comment_body):
     """
-    Post the findings as a comment on the GitHub commit.
+    Post the findings as a comment on the GitHub commit or PR.
     
     Args:
         comment_body (str): The comment content to post
     """
-    try:
-        # Construct GitHub API URL
-        url = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/commits/{GITHUB_SHA}/comments"
-        
-        # Set up headers
-        headers = {
-            'Authorization': f'token {GITHUB_TOKEN}',
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-        }
-        
-        # Create payload
-        payload = {'body': comment_body}
-        
-        # Make POST request
-        response = requests.post(url, json=payload, headers=headers)
-        
-        if response.status_code == 201:
-            print("✅ Successfully posted comment on commit")
-        else:
-            print(f"❌ Failed to post comment. Status code: {response.status_code}")
-            print(f"Response: {response.text}")
+    if not GITHUB_TOKEN or not GITHUB_REPOSITORY or not GITHUB_SHA:
+        print("⚠️ Missing GitHub environment variables, skipping comment posting")
+        return False
     
+    try:
+        # Try different comment endpoints in order of preference
+        endpoints_to_try = [
+            # First try commit comments
+            {
+                'url': f"https://api.github.com/repos/{GITHUB_REPOSITORY}/commits/{GITHUB_SHA}/comments",
+                'type': 'commit comment'
+            },
+            # Then try PR comments if this is a PR
+            {
+                'url': f"https://api.github.com/repos/{GITHUB_REPOSITORY}/issues/comments",
+                'type': 'issue comment'
+            }
+        ]
+        
+        for endpoint in endpoints_to_try:
+            try:
+                print(f"📝 Attempting to post {endpoint['type']} to GitHub...")
+                
+                # Set up headers with different auth formats
+                auth_headers = [
+                    {
+                        'Authorization': f'Bearer {GITHUB_TOKEN}',
+                        'Accept': 'application/vnd.github+json',
+                        'X-GitHub-Api-Version': '2022-11-28',
+                        'Content-Type': 'application/json'
+                    },
+                    {
+                        'Authorization': f'token {GITHUB_TOKEN}',
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Content-Type': 'application/json'
+                    }
+                ]
+                
+                for headers in auth_headers:
+                    # Create payload
+                    payload = {'body': comment_body}
+                    
+                    # Make POST request
+                    response = requests.post(endpoint['url'], json=payload, headers=headers, timeout=30)
+                    
+                    if response.status_code == 201:
+                        print(f"✅ Successfully posted {endpoint['type']} on GitHub")
+                        return True
+                    elif response.status_code == 403:
+                        print(f"🚫 Permission denied for {endpoint['type']} (403)")
+                        print(f"💡 Response: {response.text}")
+                        continue  # Try next auth method
+                    elif response.status_code == 404:
+                        print(f"🔍 Endpoint not found for {endpoint['type']} (404)")
+                        break  # Try next endpoint
+                    else:
+                        print(f"❌ Failed {endpoint['type']}. Status: {response.status_code}")
+                        print(f"📋 Response: {response.text}")
+                        continue
+                        
+            except requests.exceptions.RequestException as req_err:
+                print(f"🌐 Network error for {endpoint['type']}: {req_err}")
+                continue
+        
+        # If all methods failed, create a summary file instead
+        print("📝 All comment methods failed, creating local summary instead...")
+        create_local_summary(comment_body)
+        return False
+        
     except Exception as e:
-        print(f"Error posting comment on commit: {e}")
+        print(f"❌ Unexpected error posting comment: {e}")
+        create_local_summary(comment_body)
+        return False
+
+
+def create_local_summary(comment_body):
+    """
+    Create a local summary file when GitHub comment posting fails.
+    
+    Args:
+        comment_body (str): The comment content to save
+    """
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        summary_filename = f"security_summary_{timestamp}.md"
+        
+        with open(summary_filename, 'w', encoding='utf-8') as f:
+            f.write(f"# Security Scan Summary\n\n")
+            f.write(f"**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
+            f.write(comment_body)
+        
+        print(f"📄 Security summary saved to: {summary_filename}")
+        
+    except Exception as e:
+        print(f"❌ Error creating local summary: {e}")
 
 
 def generate_pdf_report(vulnerabilities_found, changed_files, analysis_errors):
@@ -1065,13 +1157,26 @@ if __name__ == "__main__":
         print("="*100)
         print()
     
-    # Generate and send reports if we have results (vulnerabilities or errors)
+    # Always generate reports (even if no vulnerabilities found)
+    print(f"\n📝 Generating reports...")
+    
+    # Count actual vulnerabilities vs errors
+    vuln_count = len(actual_vulnerabilities) if 'actual_vulnerabilities' in locals() else 0
+    error_count = len(errors_found) if 'errors_found' in locals() else 0
+    
+    # Always generate PDF report first
+    print("📄 Generating PDF report...")
+    pdf_path = generate_pdf_report(vulnerabilities_found, changed_files, analysis_errors)
+    
+    # Commit PDF to dedicated branch (always, regardless of findings)
+    if pdf_path:
+        print("📝 Committing PDF report to repository...")
+        commit_success = commit_pdf_to_branch(pdf_path)
+        if not commit_success:
+            print("⚠️ PDF commit failed, keeping local copy for debugging")
+    
+    # Generate and send other reports if we have results (vulnerabilities or errors)
     if vulnerabilities_found:
-        print(f"\n📝 Generating reports...")
-        
-        # Count actual vulnerabilities vs errors
-        vuln_count = len(actual_vulnerabilities)
-        error_count = len(errors_found)
         
         # Construct GitHub comment (Markdown)
         commit_comment = f"""# 🛡️ Patch Panda Security Scan Report
@@ -1148,30 +1253,13 @@ if __name__ == "__main__":
 *🐼 Report generated by **Patch Panda** Security Scanner*
 """
         
-        # Generate PDF report
-        print("📄 Generating PDF report...")
-        pdf_path = generate_pdf_report(vulnerabilities_found, changed_files, analysis_errors)
-        
-        # Commit PDF to dedicated branch
-        if pdf_path:
-            print("📝 Committing PDF report to repository...")
-            commit_success = commit_pdf_to_branch(pdf_path)
-            
-            if commit_success:
-                # Add PDF link to GitHub comment
-                reports_branch_url = f"https://github.com/{GITHUB_REPOSITORY}/blob/security-reports/reports/{os.path.basename(pdf_path)}"
-                commit_comment += f"""
+        # Add PDF link to GitHub comment if available
+        if pdf_path and os.path.exists(os.path.basename(pdf_path)) == False:  # PDF was committed successfully
+            reports_branch_url = f"https://github.com/{GITHUB_REPOSITORY}/blob/security-reports/reports/{os.path.basename(pdf_path)}"
+            commit_comment += f"""
 
 📄 **Detailed PDF Report**: [View Report]({reports_branch_url})
 """
-                # Clean up local PDF file
-                try:
-                    os.remove(pdf_path)
-                    print("🧹 Cleaned up local PDF file")
-                except Exception as e:
-                    print(f"⚠️ Warning: Could not clean up PDF file: {e}")
-            else:
-                print("⚠️ PDF commit failed, keeping local copy for debugging")
         
         # Post comment on commit
         print("📬 Posting comment to GitHub...")
@@ -1193,11 +1281,29 @@ if __name__ == "__main__":
 **Files Scanned:** {len(changed_files)}
 
 ✅ **Scan completed** - All analyzed files appear clean.
-
+"""
+        
+        # Add PDF link if available
+        if pdf_path and os.path.exists(pdf_path):
+            reports_branch_url = f"https://github.com/{GITHUB_REPOSITORY}/blob/security-reports/reports/{os.path.basename(pdf_path)}"
+            completion_comment += f"""
+📄 **Detailed PDF Report**: [View Report]({reports_branch_url})
+"""
+        
+        completion_comment += """
 ---
 *🐼 Report generated by **Patch Panda** Security Scanner*
 """
+        
         post_comment_on_commit(completion_comment)
+    
+    # Clean up local PDF file after all operations
+    if pdf_path and os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+            print("🧹 Cleaned up local PDF file")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not clean up PDF file: {e}")
     
     print(f"\n🔍 Security scan completed!")
     print(f"📊 Final Summary:")
@@ -1206,13 +1312,14 @@ if __name__ == "__main__":
     print(f"   ❌ Analysis errors: {len(analysis_errors)}")
     
     # PDF report summary
-    if REPORTLAB_AVAILABLE and vulnerabilities_found:
+    if REPORTLAB_AVAILABLE and pdf_path:
         print(f"   📄 PDF report: Generated and committed to 'security-reports' branch")
         print(f"   🔗 Report URL: https://github.com/{GITHUB_REPOSITORY}/tree/security-reports/reports")
+        print(f"   📋 PDF filename: {os.path.basename(pdf_path) if pdf_path else 'N/A'}")
     elif not REPORTLAB_AVAILABLE:
-        print(f"   📄 PDF report: Skipped (reportlab not installed)")
+        print(f"   📄 PDF report: Skipped (reportlab not available)")
     else:
-        print(f"   📄 PDF report: No content to report")
+        print(f"   📄 PDF report: Generation failed")
     
     # GitHub Actions summary annotations
     if 'actual_vulnerabilities' in locals():
