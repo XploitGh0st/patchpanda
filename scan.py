@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-Patch Panda Security Scanner
+Patch Panda Security Scanner - Enterprise Edition
 A comprehensive security scanner for GitHub Actions that analyzes changed files
-for vulnerabilities using Google's Gemini API and reports findings via GitHub
-comments and email notifications.
+for vulnerabilities using Google's Gemini 2.5 Pro Preview AI and reports findings 
+via GitHub comments and professional email notifications.
+
+Enhanced Features:
+- Gemini 2.5 Pro Preview AI model for cutting-edge security analysis
+- Professional HTML email reports with responsive design
+- Separate API key support for dedicated Pro access
+- Enhanced vulnerability detection with OWASP/CWE standards
+- Executive summary dashboards and detailed security reporting
 """
 
 import os
@@ -17,6 +24,7 @@ import requests
 
 # --- Environment Variables ---
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_PRO_API_KEY = os.getenv('GEMINI_PRO_API_KEY')  # Optional separate API key for Pro model
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 GITHUB_SHA = os.getenv('GITHUB_SHA')
@@ -116,13 +124,18 @@ def analyze_code_with_gemini(file_content, file_path=""):
         str: Analysis result from Gemini API
     """
     try:
-        # Validate API key
-        if not GEMINI_API_KEY:
-            print("❌ Error: GEMINI_API_KEY is not set")
+        # Validate API key - use Pro key if available, fallback to regular key
+        api_key = GEMINI_PRO_API_KEY if GEMINI_PRO_API_KEY else GEMINI_API_KEY
+        if not api_key:
+            print("❌ Error: Neither GEMINI_API_KEY nor GEMINI_PRO_API_KEY is set")
             return "Error: GEMINI_API_KEY not configured"
         
-        # Configure Gemini client
-        genai.configure(api_key=GEMINI_API_KEY)
+        # Configure Gemini client with the selected API key
+        genai.configure(api_key=api_key)
+        
+        # Log which API key is being used
+        key_type = "Gemini Pro API Key" if GEMINI_PRO_API_KEY else "Standard Gemini API Key"
+        print(f"🔑 Using {key_type} for analysis")
         
         # Truncate very large files to avoid token limits
         max_content_length = 30000  # Approximate token limit
@@ -130,40 +143,68 @@ def analyze_code_with_gemini(file_content, file_path=""):
             print(f"⚠️ Warning: File {file_path} is large ({len(file_content)} chars), truncating...")
             file_content = file_content[:max_content_length] + "\n\n... [File truncated for analysis] ..."
         
-        # Use the newer model name
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Use the latest Gemini 2.5 Pro Preview model
+        model = genai.GenerativeModel('gemini-2.5-pro-preview-03-25')
         
-        # Create the analysis prompt
-        prompt = f"""You are a senior cybersecurity expert specializing in multi-language code review.
-Your task is to analyze the following code snippet for potential security vulnerabilities.
+        # Create the enhanced analysis prompt for Gemini Pro
+        prompt = f"""You are an elite cybersecurity consultant and code auditor with 15+ years of experience in application security. You specialize in identifying security vulnerabilities across multiple programming languages and frameworks.
 
-First, identify the programming language of the code.
-Then, based on the identified language, analyze the code for common security vulnerabilities relevant to that language. Examples include, but are not limited to:
-- SQL Injection
-- Cross-Site Scripting (XSS)
-- Command Injection
-- Insecure Deserialization
-- Insecure File Handling (e.g., Path Traversal)
-- Hardcoded Secrets or API Keys
-- Race Conditions or Memory Safety Issues (for languages like C++, Rust, Go)
+ANALYSIS TASK:
+Perform a comprehensive security audit of the provided code snippet. Use your expertise to identify potential vulnerabilities, security weaknesses, and best practice violations.
 
-For each vulnerability you find, provide:
-1. A clear title for the vulnerability.
-2. The line number where the issue occurs.
-3. A detailed explanation of the risk.
-4. A secure code snippet suggesting how to fix it.
+ANALYSIS METHODOLOGY:
+1. **Language Detection**: First, identify the programming language and any frameworks used
+2. **Context Analysis**: Understand the code's purpose and functionality
+3. **Vulnerability Assessment**: Apply OWASP Top 10, CWE standards, and language-specific security patterns
+4. **Risk Evaluation**: Assess the severity and exploitability of identified issues
 
-If the code appears to be secure and you find no vulnerabilities, you MUST respond with the exact phrase: 'No issues found.'.
+VULNERABILITY CATEGORIES TO EXAMINE:
+🔍 **Injection Attacks**: SQL, NoSQL, Command, LDAP, XML injection
+🔍 **Authentication & Authorization**: Broken authentication, privilege escalation, session management
+🔍 **Data Exposure**: Sensitive data leakage, insecure storage, information disclosure
+🔍 **Input Validation**: XSS, CSRF, input sanitization, path traversal
+🔍 **Cryptography**: Weak encryption, insecure hashing, key management
+🔍 **Configuration**: Security misconfigurations, default credentials, debug mode
+🔍 **Dependencies**: Known vulnerable components, outdated libraries
+🔍 **Business Logic**: Race conditions, workflow bypasses, logic flaws
+🔍 **Memory Safety** (C/C++/Rust): Buffer overflows, memory leaks, use-after-free
+🔍 **Concurrency Issues**: Race conditions, deadlocks, thread safety
 
-Code to analyze:
-{file_content}"""
+RESPONSE FORMAT:
+For each vulnerability found, provide:
+
+**🚨 [SEVERITY] [Vulnerability Name]**
+- **Location**: Line X-Y or specific function/method
+- **Risk Level**: Critical/High/Medium/Low + CVSS score estimate if applicable  
+- **Description**: Clear explanation of the security issue and potential impact
+- **Exploitation Scenario**: How an attacker might exploit this vulnerability
+- **Remediation**: Specific code changes or security controls needed
+- **Secure Code Example**: Demonstrate the fix with corrected code snippet
+
+IMPORTANT GUIDELINES:
+- Use professional security terminology and industry standards
+- Provide actionable remediation advice with code examples
+- Consider the broader security context, not just individual lines
+- If the code appears secure, respond EXACTLY with: "No issues found."
+- Focus on genuine security issues, not minor code quality problems
+- Consider both direct vulnerabilities and potential attack vectors
+
+FILE CONTEXT: {file_path}
+CODE TO ANALYZE:
+
+```
+{file_content}
+```
+
+Begin your security analysis now:"""
         
-        # Configure generation parameters for better reliability
+        # Configure generation parameters for high-quality security analysis
         generation_config = genai.types.GenerationConfig(
-            temperature=0.1,  # Low temperature for consistent results
-            max_output_tokens=2048,
-            top_p=0.8,
-            top_k=40
+            temperature=0.1,  # Very low temperature for consistent, focused analysis
+            max_output_tokens=4096,  # Increased for detailed security reports
+            top_p=0.9,  # Slightly higher for more comprehensive coverage
+            top_k=20,   # More focused on relevant security concepts
+            candidate_count=1
         )
         
         # Generate content using Gemini with retry logic
@@ -278,8 +319,19 @@ def send_email_report_with_gmail(report_body_html):
         # Extract repository name for subject
         repo_name = GITHUB_REPOSITORY.split('/')[-1] if GITHUB_REPOSITORY else "Unknown Repository"
         
+        # Create professional subject line based on findings
+        if vuln_count > 0:
+            if vuln_count == 1:
+                subject = f"🚨 SECURITY ALERT: 1 Vulnerability Detected in {repo_name}"
+            else:
+                subject = f"🚨 SECURITY ALERT: {vuln_count} Vulnerabilities Detected in {repo_name}"
+        elif error_count > 0:
+            subject = f"⚠️ Security Scan Issues in {repo_name} - Analysis Errors Detected"
+        else:
+            subject = f"✅ Security Scan Complete: {repo_name} - No Issues Found"
+        
         # Set email headers
-        msg['Subject'] = f"Security Scan Report for {repo_name}"
+        msg['Subject'] = subject
         msg['From'] = REPORT_EMAIL_FROM
         msg['To'] = REPORT_EMAIL_TO
         
@@ -308,9 +360,11 @@ if __name__ == "__main__":
     print("🔍 Starting Patch Panda Security Scan...")
     
     # Validate required environment variables
-    if not GEMINI_API_KEY:
-        print("❌ Error: GEMINI_API_KEY environment variable is required")
-        print("💡 Get your API key from: https://makersuite.google.com/app/apikey")
+    api_key = GEMINI_PRO_API_KEY if GEMINI_PRO_API_KEY else GEMINI_API_KEY
+    if not api_key:
+        print("❌ Error: GEMINI_API_KEY or GEMINI_PRO_API_KEY environment variable is required")
+        print("💡 Get your API key from: https://aistudio.google.com/app/apikey")
+        print("💡 For enhanced analysis, set GEMINI_PRO_API_KEY for dedicated Pro model access")
         exit(1)
     
     if not all([GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_SHA]):
@@ -318,17 +372,32 @@ if __name__ == "__main__":
         print("💡 These are automatically provided by GitHub Actions")
         exit(1)
     
-    # Test Gemini API connection
-    print("🔌 Testing Gemini API connection...")
+    # Test Gemini API connection with 2.5 Pro Preview model
+    print("🔌 Testing Gemini 2.5 Pro Preview API connection...")
     try:
         import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        test_response = model.generate_content("Hello, this is a test.")
-        print("✅ Gemini API connection successful")
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.5-pro-preview-03-25')
+        
+        # Test with a security-focused prompt
+        test_response = model.generate_content(
+            "You are a cybersecurity expert. Respond with: 'Gemini 2.5 Pro Preview security analysis ready.'",
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=50
+            )
+        )
+        print("✅ Gemini 2.5 Pro Preview API connection successful")
+        print(f"🤖 Model response: {test_response.text.strip()}")
+        
+        # Log which API configuration is being used
+        key_type = "Dedicated Pro API Key" if GEMINI_PRO_API_KEY else "Standard API Key with 2.5 Pro Preview"
+        print(f"🔑 Using: {key_type}")
+        
     except Exception as e:
-        print(f"❌ Gemini API connection failed: {e}")
-        print("💡 Check your API key and internet connection")
+        print(f"❌ Gemini 2.5 Pro Preview API connection failed: {e}")
+        print("💡 Check your API key, internet connection, and API quotas")
+        print("💡 Ensure your API key has access to Gemini 2.5 Pro Preview model")
         exit(1)
     
     # Get changed files
@@ -434,10 +503,21 @@ if __name__ == "__main__":
                 
                 # Format for HTML (Email)
                 html_report = f"""
-<h3>🚨 Security Issues Found in <code>{file_path}</code></h3>
-<pre style="white-space: pre-wrap; background-color: #f8f8f8; padding: 10px; border-radius: 5px;">{analysis_result}</pre>
-<hr>
-"""
+            <div class="section">
+                <div class="vulnerability-card">
+                    <div class="vulnerability-header critical">
+                        <h3>🚨 Critical Security Issues
+                            <span class="file-badge">{file_path}</span>
+                        </h3>
+                    </div>
+                    <div class="vulnerability-content">
+                        <div class="vulnerability-details">{analysis_result}</div>
+                        <p style="margin-top: 15px; color: #718096; font-size: 13px;">
+                            <strong>Recommendation:</strong> Address these vulnerabilities immediately to prevent potential security breaches.
+                        </p>
+                    </div>
+                </div>
+            </div>"""
                 
                 vulnerabilities_found.append({
                     'file': file_path,
@@ -472,11 +552,13 @@ if __name__ == "__main__":
 """
                 
                 html_error_report = f"""
-<h3>⚠️ Analysis Error in <code>{file_path}</code></h3>
-<p style="color: #ff6b6b; background-color: #fff5f5; padding: 10px; border-radius: 5px;">{analysis_result}</p>
-<p><strong>Recommendation:</strong> Check file encoding, size, or API connectivity.</p>
-<hr>
-"""
+            <div class="error-card">
+                <h3>⚠️ Analysis Error in <code>{file_path}</code></h3>
+                <div class="error-message">{analysis_result}</div>
+                <p style="margin-top: 15px; color: #718096; font-size: 13px;">
+                    <strong>Troubleshooting:</strong> This error may be caused by file encoding issues, large file size, or API connectivity problems. Please verify the file can be read correctly and try again.
+                </p>
+            </div>"""
                 
                 vulnerabilities_found.append({
                     'file': file_path,
@@ -560,35 +642,359 @@ if __name__ == "__main__":
         
         email_report = f"""
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Security Scan Report</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Scan Report - {repo_name}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .header {{ background-color: {header_color}; color: white; padding: 20px; text-align: center; }}
-        .content {{ padding: 20px; }}
-        .summary {{ background-color: #f4f4f4; padding: 15px; border-left: 4px solid {header_color}; margin: 20px 0; }}
-        code {{ background-color: #f4f4f4; padding: 2px 4px; border-radius: 3px; }}
-        pre {{ background-color: #f8f8f8; padding: 10px; border-radius: 5px; overflow-x: auto; }}
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.7;
+            color: #2c3e50;
+            background-color: #f8fafc;
+        }}
+        
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border-radius: 12px;
+            overflow: hidden;
+        }}
+        
+        .header {{
+            background: linear-gradient(135deg, {header_color} 0%, {'#e74c3c' if vuln_count > 0 else '#f39c12'} 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+            position: relative;
+        }}
+        
+        .header::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 20"><defs><linearGradient id="a" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="%23ffffff" stop-opacity="0.1"/><stop offset="1" stop-color="%23ffffff" stop-opacity="0"/></linearGradient></defs><rect width="100" height="20" fill="url(%23a)"/></svg>') repeat-x;
+            opacity: 0.1;
+        }}
+        
+        .header h1 {{
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }}
+        
+        .header .subtitle {{
+            font-size: 16px;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
+        }}
+        
+        .content {{
+            padding: 40px 30px;
+        }}
+        
+        .summary-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }}
+        
+        .summary-card {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+            transition: transform 0.3s ease;
+        }}
+        
+        .summary-card:hover {{
+            transform: translateY(-2px);
+        }}
+        
+        .summary-card.danger {{
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }}
+        
+        .summary-card.warning {{
+            background: linear-gradient(135deg, #feca57 0%, #ff9ff3 100%);
+            box-shadow: 0 4px 15px rgba(254, 202, 87, 0.3);
+        }}
+        
+        .summary-card.success {{
+            background: linear-gradient(135deg, #48cae4 0%, #023047 100%);
+            box-shadow: 0 4px 15px rgba(72, 202, 228, 0.3);
+        }}
+        
+        .summary-card h3 {{
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }}
+        
+        .summary-card p {{
+            font-size: 14px;
+            opacity: 0.9;
+            font-weight: 500;
+        }}
+        
+        .section {{
+            margin: 40px 0;
+        }}
+        
+        .section-header {{
+            border-left: 5px solid {header_color};
+            padding-left: 20px;
+            margin-bottom: 25px;
+        }}
+        
+        .section-header h2 {{
+            font-size: 24px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }}
+        
+        .section-header p {{
+            color: #718096;
+            font-size: 14px;
+        }}
+        
+        .vulnerability-card {{
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            margin: 20px 0;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }}
+        
+        .vulnerability-card:hover {{
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }}
+        
+        .vulnerability-header {{
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 20px;
+            border-bottom: 1px solid #dee2e6;
+        }}
+        
+        .vulnerability-header.critical {{
+            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+            border-left: 4px solid #dc2626;
+        }}
+        
+        .vulnerability-header.high {{
+            background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+            border-left: 4px solid #ea580c;
+        }}
+        
+        .vulnerability-header h3 {{
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+        }}
+        
+        .file-badge {{
+            background: #4f46e5;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 10px;
+        }}
+        
+        .vulnerability-content {{
+            padding: 25px;
+        }}
+        
+        .vulnerability-details {{
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #2d3748;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }}
+        
+        .error-card {{
+            background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+            border: 1px solid #feb2b2;
+            border-radius: 12px;
+            margin: 20px 0;
+            padding: 25px;
+            border-left: 4px solid #e53e3e;
+        }}
+        
+        .error-card h3 {{
+            color: #c53030;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }}
+        
+        .error-card .error-message {{
+            background: #ffffff;
+            border: 1px solid #feb2b2;
+            border-radius: 6px;
+            padding: 15px;
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 13px;
+            color: #742a2a;
+            margin: 10px 0;
+        }}
+        
+        .footer {{
+            background: #f7fafc;
+            padding: 30px;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+        }}
+        
+        .footer-content {{
+            max-width: 600px;
+            margin: 0 auto;
+        }}
+        
+        .footer h3 {{
+            color: #2d3748;
+            font-size: 18px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }}
+        
+        .footer p {{
+            color: #718096;
+            font-size: 14px;
+            line-height: 1.6;
+            margin: 8px 0;
+        }}
+        
+        .footer-links {{
+            margin: 20px 0;
+        }}
+        
+        .footer-links a {{
+            display: inline-block;
+            background: #4f46e5;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 14px;
+            margin: 5px 10px;
+            transition: background-color 0.3s ease;
+        }}
+        
+        .footer-links a:hover {{
+            background: #3730a3;
+        }}
+        
+        .timestamp {{
+            background: #edf2f7;
+            color: #4a5568;
+            padding: 15px;
+            text-align: center;
+            font-size: 12px;
+            font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+        }}
+        
+        @media (max-width: 600px) {{
+            .container {{
+                margin: 10px;
+                border-radius: 8px;
+            }}
+            
+            .header {{
+                padding: 30px 20px;
+            }}
+            
+            .content {{
+                padding: 30px 20px;
+            }}
+            
+            .summary-grid {{
+                grid-template-columns: 1fr;
+            }}
+            
+            .vulnerability-header h3 {{
+                flex-direction: column;
+                align-items: flex-start;
+            }}
+            
+            .file-badge {{
+                margin-left: 0;
+                margin-top: 8px;
+            }}
+        }}
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🛡️ Patch Panda Security Scan Report</h1>
-    </div>
-    <div class="content">
-        <div class="summary">
-            <h2>📊 Scan Summary</h2>
-            <ul>
-                <li><strong>Repository:</strong> {GITHUB_REPOSITORY}</li>
-                <li><strong>Commit:</strong> <a href="{commit_url}">{GITHUB_SHA[:8]}</a></li>
-                <li><strong>Files Scanned:</strong> {len(changed_files)}</li>
-                <li><strong>Security Issues:</strong> {vuln_count}</li>
-                <li><strong>Analysis Errors:</strong> {error_count}</li>
-            </ul>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ Security Scan Report</h1>
+            <p class="subtitle">Comprehensive vulnerability analysis powered by Gemini Pro AI</p>
         </div>
         
-        <h2>🔍 Detailed Results</h2>
+        <div class="content">
+            <div class="section">
+                <div class="section-header">
+                    <h2>📊 Executive Summary</h2>
+                    <p>Overview of security analysis results for your repository</p>
+                </div>
+                
+                <div class="summary-grid">
+                    <div class="summary-card {'danger' if vuln_count > 0 else 'success'}">
+                        <h3>{vuln_count}</h3>
+                        <p>Security Vulnerabilities</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3>{len(changed_files)}</h3>
+                        <p>Files Analyzed</p>
+                    </div>
+                    <div class="summary-card {'warning' if error_count > 0 else 'success'}">
+                        <h3>{error_count}</h3>
+                        <p>Analysis Errors</p>
+                    </div>
+                </div>
+                
+                <div style="background: #f7fafc; padding: 20px; border-radius: 8px; border-left: 4px solid #4f46e5;">
+                    <h3 style="color: #2d3748; margin-bottom: 10px; font-size: 16px;">📂 Repository Details</h3>
+                    <p style="margin: 5px 0;"><strong>Repository:</strong> <code>{GITHUB_REPOSITORY}</code></p>
+                    <p style="margin: 5px 0;"><strong>Commit SHA:</strong> <a href="{commit_url}" style="color: #4f46e5; text-decoration: none;"><code>{GITHUB_SHA[:8]}</code></a></p>
+                    <p style="margin: 5px 0;"><strong>Analysis Engine:</strong> Google Gemini 2.5 Pro Preview</p>
+                </div>
+            </div>"""
 """
         
         # Add individual vulnerability reports
@@ -597,15 +1003,37 @@ if __name__ == "__main__":
             email_report += vuln['html']
         
         # Add footer to email
+        import datetime
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        
         email_report += f"""
-        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; color: #666; font-size: 12px;">
-            <p>This report was generated by Patch Panda Security Scanner.</p>
-            <p>View the commit: <a href="{commit_url}">{GITHUB_SHA[:8]}</a></p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="footer-content">
+                <h3>🐼 Patch Panda Security Scanner</h3>
+                <p>Advanced AI-powered security analysis using Google Gemini 2.5 Pro Preview</p>
+                <p>This automated scan helps identify potential security vulnerabilities in your codebase.</p>
+                
+                <div class="footer-links">
+                    <a href="{commit_url}">View Commit</a>
+                    <a href="https://github.com/{GITHUB_REPOSITORY}">View Repository</a>
+                </div>
+                
+                <p style="margin-top: 20px; font-size: 12px;">
+                    For questions about this report, please contact your development team.<br>
+                    This is an automated message - please do not reply directly to this email.
+                </p>
+            </div>
+        </div>
+        
+        <div class="timestamp">
+            Report generated on {current_time} | Powered by Gemini 2.5 Pro Preview AI
         </div>
     </div>
 </body>
-</html>
-"""
+</html>"""
         
         # Add footer to commit comment
         commit_comment += f"""
