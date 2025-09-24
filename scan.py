@@ -144,7 +144,7 @@ def analyze_code_with_gemini(file_content, file_path=""):
             file_content = file_content[:max_content_length] + "\n\n... [File truncated for analysis] ..."
         
         # Use the latest Gemini model
-        model = genai.GenerativeModel('gemini-2.5-pro-preview-03-25')
+        model = genai.GenerativeModel('gemini-2.5-pro-preview-06-05')
         
         # Create the analysis prompt with structured output requirements
         prompt = f"""You are a senior cybersecurity expert specializing in multi-language code review.
@@ -676,7 +676,7 @@ if __name__ == "__main__":
     try:
         import google.generativeai as genai
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-pro-preview-03-25')
+        model = genai.GenerativeModel('gemini-2.5-pro-preview-06-05')
         test_response = model.generate_content("Hello, this is a test.")
         print("✅ Gemini API connection successful")
     except Exception as e:
