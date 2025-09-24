@@ -37,6 +37,10 @@ GMAIL_APP_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
 REPORT_EMAIL_FROM = os.getenv('REPORT_EMAIL_FROM')
 REPORT_EMAIL_TO = os.getenv('REPORT_EMAIL_TO')
 
+# --- Rate Limiting Configuration ---
+API_CALLS_MADE = 0  # Track number of API calls
+MAX_FILES_PER_RUN = 10  # Limit files per scan to prevent rate limiting
+
 
 def get_changed_files():
     """
@@ -144,7 +148,7 @@ def analyze_code_with_gemini(file_content, file_path=""):
             file_content = file_content[:max_content_length] + "\n\n... [File truncated for analysis] ..."
         
         # Use the latest Gemini model
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-pro-preview-06-05')
         
         # Create the analysis prompt with structured output requirements
         prompt = f"""You are a senior cybersecurity expert specializing in multi-language code review.
@@ -194,10 +198,27 @@ Code to analyze:
             top_k=40
         )
         
-        # Generate content using Gemini with retry logic
-        max_retries = 3
+        # Generate content using Gemini with enhanced retry logic for rate limiting
+        max_retries = 5  # Increased for rate limit handling
+        base_delay = 2  # Base delay in seconds
+        
         for attempt in range(max_retries):
             try:
+                # Add small delay between requests to avoid rate limiting
+                if attempt > 0:
+                    import time
+                    # Progressive delay: 2s, 5s, 10s, 20s, 40s
+                    delay = base_delay * (2 ** attempt)
+                    print(f"⏳ Waiting {delay}s before retry {attempt + 1}...")
+                    time.sleep(delay)
+                
+                print(f"🤖 Sending request to Gemini (attempt {attempt + 1}/{max_retries})...")
+                
+                # Track API calls
+                global API_CALLS_MADE
+                API_CALLS_MADE += 1
+                print(f"📊 API call #{API_CALLS_MADE}")
+                
                 response = model.generate_content(
                     prompt,
                     generation_config=generation_config,
@@ -222,19 +243,45 @@ Code to analyze:
                 )
                 
                 if response.text:
+                    print(f"✅ Successful analysis for {file_path}")
                     return response.text
                 else:
                     print(f"⚠️ Warning: Empty response from Gemini for {file_path}")
                     return "No issues found."
                     
             except Exception as retry_error:
-                print(f"🔄 Attempt {attempt + 1} failed for {file_path}: {retry_error}")
-                if attempt == max_retries - 1:
-                    raise retry_error
+                error_msg = str(retry_error).lower()
                 
-                # Wait before retry (exponential backoff)
-                import time
-                time.sleep(2 ** attempt)
+                # Enhanced error handling for different types of API errors
+                if "rate limit" in error_msg or "quota" in error_msg:
+                    print(f"� Rate limit hit on attempt {attempt + 1} for {file_path}")
+                    print(f"📊 Error details: {retry_error}")
+                    
+                    if attempt < max_retries - 1:
+                        # For rate limits, use longer delays
+                        delay = base_delay * (3 ** attempt)  # 2s, 6s, 18s, 54s
+                        print(f"⏳ Rate limit backoff: waiting {delay}s before retry...")
+                        import time
+                        time.sleep(delay)
+                        continue
+                    else:
+                        return f"Error: API rate limit exceeded after {max_retries} attempts. Please try again later or upgrade your API quota."
+                        
+                elif "api key" in error_msg or "authentication" in error_msg:
+                    return "Error: Invalid API key or authentication failed"
+                    
+                elif "network" in error_msg or "connection" in error_msg:
+                    print(f"🌐 Network error on attempt {attempt + 1}: {retry_error}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return "Error: Network connectivity issues"
+                        
+                else:
+                    print(f"🔄 Attempt {attempt + 1} failed for {file_path}: {retry_error}")
+                    
+                    if attempt == max_retries - 1:
+                        return f"Error: {retry_error}"
         
         return "Error occurred during analysis"
     
@@ -709,6 +756,12 @@ if __name__ == "__main__":
     
     print(f"📁 Found {len(changed_files)} changed source code file(s): {', '.join(changed_files)}")
     
+    # Limit files to prevent rate limiting
+    if len(changed_files) > MAX_FILES_PER_RUN:
+        print(f"⚠️ Warning: Found {len(changed_files)} files, limiting to {MAX_FILES_PER_RUN} to prevent rate limiting")
+        changed_files = changed_files[:MAX_FILES_PER_RUN]
+        print(f"📝 Scanning first {len(changed_files)} files: {', '.join(changed_files)}")
+    
     # Initialize vulnerabilities list
     vulnerabilities_found = []
     analysis_errors = []
@@ -749,6 +802,12 @@ if __name__ == "__main__":
             if not file_content.strip():
                 print(f"ℹ️ Skipping empty file: {file_path}")
                 continue
+            
+            # Add small delay between files to prevent rate limiting
+            if changed_files.index(file_path) > 0:  # Skip delay for first file
+                import time
+                print("⏳ Adding 2s delay between file analyses to prevent rate limiting...")
+                time.sleep(2)
             
             # Analyze with Gemini
             print(f"🤖 Sending {file_path} to Gemini for analysis...")
