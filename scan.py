@@ -25,7 +25,7 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
-    print("⚠️ Warning: reportlab not installed. PDF generation will be skipped.")
+    print("⚠️ Warning: reportlab not installed. PDF generation will be skipped...")
 
 
 # --- Environment Variables ---
