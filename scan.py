@@ -13,6 +13,19 @@ import ssl
 from email.message import EmailMessage
 import google.generativeai as genai
 import requests
+from datetime import datetime
+import json
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib.colors import HexColor, black, red, orange, yellow, green
+    from reportlab.lib import colors
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+    print("⚠️ Warning: reportlab not installed. PDF generation will be skipped.")
 
 
 # --- Environment Variables ---
@@ -272,6 +285,331 @@ def post_comment_on_commit(comment_body):
     
     except Exception as e:
         print(f"Error posting comment on commit: {e}")
+
+
+def generate_pdf_report(vulnerabilities_found, changed_files, analysis_errors):
+    """
+    Generate a comprehensive PDF security report.
+    
+    Args:
+        vulnerabilities_found (list): List of vulnerability findings
+        changed_files (list): List of scanned files
+        analysis_errors (list): List of analysis errors
+        
+    Returns:
+        str: Path to the generated PDF file or None if generation failed
+    """
+    if not REPORTLAB_AVAILABLE:
+        print("⚠️ PDF generation skipped - reportlab not installed")
+        return None
+    
+    try:
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        commit_short = GITHUB_SHA[:8] if GITHUB_SHA else "unknown"
+        repo_name = GITHUB_REPOSITORY.split('/')[-1] if GITHUB_REPOSITORY else "unknown"
+        pdf_filename = f"security_report_{repo_name}_{commit_short}_{timestamp}.pdf"
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Title'],
+            fontSize=24,
+            spaceAfter=30,
+            textColor=HexColor('#2c3e50'),
+            alignment=1  # Center alignment
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=HexColor('#34495e'),
+            leftIndent=0
+        )
+        
+        subheading_style = ParagraphStyle(
+            'CustomSubHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            spaceAfter=8,
+            textColor=HexColor('#7f8c8d'),
+            leftIndent=0
+        )
+        
+        # Content container
+        content = []
+        
+        # Title page
+        content.append(Paragraph("🛡️ Patch Panda Security Scan Report", title_style))
+        content.append(Spacer(1, 20))
+        
+        # Summary table
+        summary_data = [
+            ['Repository', GITHUB_REPOSITORY or 'N/A'],
+            ['Commit', GITHUB_SHA[:8] if GITHUB_SHA else 'N/A'],
+            ['Scan Date', datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")],
+            ['Files Scanned', str(len(changed_files))],
+            ['Vulnerabilities Found', str(len([v for v in vulnerabilities_found if v.get('is_vulnerability', True)]))],
+            ['Analysis Errors', str(len(analysis_errors))]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[2*inch, 3*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), HexColor('#ecf0f1')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#2c3e50')),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), HexColor('#ffffff')),
+            ('GRID', (0, 0), (-1, -1), 1, HexColor('#bdc3c7'))
+        ]))
+        
+        content.append(summary_table)
+        content.append(Spacer(1, 30))
+        
+        # Separate vulnerabilities from errors
+        actual_vulnerabilities = [v for v in vulnerabilities_found if v.get('is_vulnerability', True)]
+        errors_found = [v for v in vulnerabilities_found if not v.get('is_vulnerability', True)]
+        
+        # Vulnerabilities section
+        if actual_vulnerabilities:
+            content.append(Paragraph("🚨 Security Vulnerabilities", heading_style))
+            content.append(Spacer(1, 12))
+            
+            for i, vuln in enumerate(actual_vulnerabilities, 1):
+                # Parse vulnerability content
+                vuln_content = vuln['markdown'].replace('## 🚨 Security Issues Found in', '').replace('---', '').strip()
+                
+                content.append(Paragraph(f"Vulnerability #{i}: {vuln['file']}", subheading_style))
+                
+                # Parse structured content
+                lines = vuln_content.split('\n')
+                formatted_content = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    if line.startswith('**VULNERABILITY #'):
+                        formatted_content.append(f"<b>{line.replace('**', '')}</b>")
+                    elif line.startswith('- **Line(s)'):
+                        formatted_content.append(f"📍 {line[3:].replace('**', '')}")
+                    elif line.startswith('- **Severity'):
+                        severity = line.split(':')[1].strip() if ':' in line else 'Unknown'
+                        severity_color = {
+                            'Critical': '#e74c3c',
+                            'High': '#f39c12', 
+                            'Medium': '#f1c40f',
+                            'Low': '#27ae60'
+                        }.get(severity.replace('**', ''), '#95a5a6')
+                        formatted_content.append(f"<font color='{severity_color}'>🔴 {line[3:].replace('**', '')}</font>")
+                    elif line.startswith('- **Risk'):
+                        formatted_content.append(f"⚠️ {line[3:].replace('**', '')}")
+                    elif line.startswith('- **Fix'):
+                        formatted_content.append(f"🔧 {line[3:].replace('**', '')}")
+                    elif line and not line.startswith('**'):
+                        formatted_content.append(line)
+                
+                # Add formatted content
+                for formatted_line in formatted_content:
+                    content.append(Paragraph(formatted_line, styles['Normal']))
+                    content.append(Spacer(1, 6))
+                
+                content.append(Spacer(1, 20))
+        
+        # Analysis errors section
+        if errors_found:
+            content.append(Paragraph("⚠️ Analysis Errors", heading_style))
+            content.append(Spacer(1, 12))
+            
+            for i, error in enumerate(errors_found, 1):
+                content.append(Paragraph(f"Error #{i}: {error['file']}", subheading_style))
+                error_content = error['markdown'].replace('## ⚠️ Analysis Error in', '').replace('---', '').strip()
+                content.append(Paragraph(error_content, styles['Normal']))
+                content.append(Spacer(1, 15))
+        
+        # Files scanned section
+        if changed_files:
+            content.append(Paragraph("📁 Files Scanned", heading_style))
+            content.append(Spacer(1, 12))
+            
+            files_data = [['File Path', 'Status']]
+            for file_path in changed_files:
+                has_vulns = any(vuln['file'] == file_path for vuln in actual_vulnerabilities)
+                has_errors = any(error['file'] == file_path for error in errors_found)
+                
+                if has_vulns:
+                    status = "🚨 Vulnerabilities Found"
+                elif has_errors:
+                    status = "❌ Analysis Error"
+                else:
+                    status = "✅ Clean"
+                    
+                files_data.append([file_path, status])
+            
+            files_table = Table(files_data, colWidths=[4*inch, 1.5*inch])
+            files_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#ecf0f1')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), HexColor('#2c3e50')),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), HexColor('#ffffff')),
+                ('GRID', (0, 0), (-1, -1), 1, HexColor('#bdc3c7')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP')
+            ]))
+            
+            content.append(files_table)
+        
+        # Footer
+        content.append(Spacer(1, 30))
+        content.append(Paragraph("Generated by Patch Panda Security Scanner", styles['Normal']))
+        content.append(Paragraph(f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}", styles['Normal']))
+        
+        # Build PDF
+        doc.build(content)
+        
+        print(f"✅ PDF report generated: {pdf_filename}")
+        return pdf_filename
+        
+    except Exception as e:
+        print(f"❌ Error generating PDF report: {e}")
+        return None
+
+
+def commit_pdf_to_branch(pdf_path):
+    """
+    Commit the PDF report to a dedicated branch in the repository.
+    
+    Args:
+        pdf_path (str): Path to the PDF file to commit
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not pdf_path or not os.path.exists(pdf_path):
+        print("❌ PDF file not found, skipping Git commit")
+        return False
+    
+    try:
+        # Validate Git environment
+        if not GITHUB_TOKEN:
+            print("❌ GITHUB_TOKEN not available, cannot commit to repository")
+            return False
+        
+        # Branch name for reports
+        reports_branch = "security-reports"
+        
+        print(f"📝 Committing PDF report to {reports_branch} branch...")
+        
+        # Configure Git user (required for commits)
+        subprocess.run(['git', 'config', 'user.name', 'Patch Panda Scanner'], check=True, capture_output=True)
+        subprocess.run(['git', 'config', 'user.email', 'security-scanner@patchpanda.ai'], check=True, capture_output=True)
+        
+        # Set up authentication for HTTPS
+        if GITHUB_REPOSITORY and GITHUB_TOKEN:
+            auth_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPOSITORY}.git"
+            subprocess.run(['git', 'remote', 'set-url', 'origin', auth_url], check=True, capture_output=True)
+        
+        # Fetch latest changes
+        subprocess.run(['git', 'fetch', 'origin'], check=True, capture_output=True)
+        
+        # Check if reports branch exists remotely
+        branch_check = subprocess.run(
+            ['git', 'ls-remote', '--heads', 'origin', reports_branch],
+            capture_output=True, text=True
+        )
+        
+        if branch_check.stdout.strip():
+            # Branch exists, checkout and pull
+            print(f"🔄 Checking out existing {reports_branch} branch...")
+            subprocess.run(['git', 'checkout', reports_branch], check=True, capture_output=True)
+            subprocess.run(['git', 'pull', 'origin', reports_branch], check=True, capture_output=True)
+        else:
+            # Branch doesn't exist, create it
+            print(f"🌟 Creating new {reports_branch} branch...")
+            subprocess.run(['git', 'checkout', '--orphan', reports_branch], check=True, capture_output=True)
+            
+            # Remove all files from staging (orphan branch starts with all files staged)
+            subprocess.run(['git', 'rm', '-rf', '.'], check=True, capture_output=True)
+            
+            # Create a README for the reports branch
+            readme_content = f"""# Security Reports Branch
+
+This branch contains PDF security reports generated by Patch Panda Scanner.
+
+## About
+- **Repository**: {GITHUB_REPOSITORY}
+- **Scanner**: Patch Panda Security Scanner
+- **Reports**: Organized by date and commit
+
+## Report Format
+- Filename pattern: `security_report_<repo>_<commit>_<timestamp>.pdf`
+- Contains detailed vulnerability analysis
+- Includes scanned files and error reports
+- Generated automatically on each scan
+
+## Latest Reports
+Reports are automatically added here after each security scan.
+"""
+            
+            with open('README.md', 'w', encoding='utf-8') as f:
+                f.write(readme_content)
+            
+            subprocess.run(['git', 'add', 'README.md'], check=True, capture_output=True)
+        
+        # Create reports directory if it doesn't exist
+        reports_dir = 'reports'
+        if not os.path.exists(reports_dir):
+            os.makedirs(reports_dir)
+        
+        # Move PDF to reports directory
+        pdf_filename = os.path.basename(pdf_path)
+        new_pdf_path = os.path.join(reports_dir, pdf_filename)
+        
+        if os.path.exists(new_pdf_path):
+            os.remove(new_pdf_path)  # Remove existing file
+        
+        # Copy PDF to reports directory
+        subprocess.run(['copy' if os.name == 'nt' else 'cp', pdf_path, new_pdf_path], 
+                      shell=True, check=True)
+        
+        # Add and commit the PDF
+        subprocess.run(['git', 'add', new_pdf_path], check=True, capture_output=True)
+        
+        commit_message = f"Add security report for commit {GITHUB_SHA[:8] if GITHUB_SHA else 'unknown'}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        
+        subprocess.run(['git', 'commit', '-m', commit_message], check=True, capture_output=True)
+        
+        # Push to remote
+        subprocess.run(['git', 'push', 'origin', reports_branch], check=True, capture_output=True)
+        
+        # Switch back to original branch
+        original_branch = os.getenv('GITHUB_REF_NAME', 'main')
+        subprocess.run(['git', 'checkout', original_branch], check=True, capture_output=True)
+        
+        print(f"✅ PDF report committed to {reports_branch} branch successfully")
+        print(f"📂 Report location: {reports_branch}/reports/{pdf_filename}")
+        
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Git command failed: {e}")
+        print(f"Command output: {e.output if hasattr(e, 'output') else 'N/A'}")
+        return False
+    except Exception as e:
+        print(f"❌ Error committing PDF to branch: {e}")
+        return False
 
 
 def send_email_report_with_gmail(report_body_html):
@@ -751,6 +1089,31 @@ if __name__ == "__main__":
 *🐼 Report generated by **Patch Panda** Security Scanner*
 """
         
+        # Generate PDF report
+        print("📄 Generating PDF report...")
+        pdf_path = generate_pdf_report(vulnerabilities_found, changed_files, analysis_errors)
+        
+        # Commit PDF to dedicated branch
+        if pdf_path:
+            print("📝 Committing PDF report to repository...")
+            commit_success = commit_pdf_to_branch(pdf_path)
+            
+            if commit_success:
+                # Add PDF link to GitHub comment
+                reports_branch_url = f"https://github.com/{GITHUB_REPOSITORY}/blob/security-reports/reports/{os.path.basename(pdf_path)}"
+                commit_comment += f"""
+
+📄 **Detailed PDF Report**: [View Report]({reports_branch_url})
+"""
+                # Clean up local PDF file
+                try:
+                    os.remove(pdf_path)
+                    print("🧹 Cleaned up local PDF file")
+                except Exception as e:
+                    print(f"⚠️ Warning: Could not clean up PDF file: {e}")
+            else:
+                print("⚠️ PDF commit failed, keeping local copy for debugging")
+        
         # Post comment on commit
         print("📬 Posting comment to GitHub...")
         post_comment_on_commit(commit_comment)
@@ -783,18 +1146,30 @@ if __name__ == "__main__":
     print(f"   🚨 Security issues: {len(actual_vulnerabilities) if 'actual_vulnerabilities' in locals() else 0}")
     print(f"   ❌ Analysis errors: {len(analysis_errors)}")
     
+    # PDF report summary
+    if REPORTLAB_AVAILABLE and vulnerabilities_found:
+        print(f"   📄 PDF report: Generated and committed to 'security-reports' branch")
+        print(f"   🔗 Report URL: https://github.com/{GITHUB_REPOSITORY}/tree/security-reports/reports")
+    elif not REPORTLAB_AVAILABLE:
+        print(f"   📄 PDF report: Skipped (reportlab not installed)")
+    else:
+        print(f"   📄 PDF report: No content to report")
+    
     # GitHub Actions summary annotations
     if 'actual_vulnerabilities' in locals():
         vuln_count = len(actual_vulnerabilities)
         if vuln_count > 0:
             print(f"::notice title=Patch Panda Security Scan::🚨 Found {vuln_count} security vulnerabilities across {len(changed_files)} files")
             print(f"::warning::🚨 SECURITY ALERT: {vuln_count} vulnerabilities detected! Check the scan results above.")
+            if REPORTLAB_AVAILABLE:
+                print(f"::notice::📄 Detailed PDF report available in 'security-reports' branch")
         else:
             print(f"::notice title=Patch Panda Security Scan::✅ No security vulnerabilities detected in {len(changed_files)} files")
     
     # Exit with appropriate code
     if 'actual_vulnerabilities' in locals() and len(actual_vulnerabilities) > 0:
         print("⚠️ Security vulnerabilities detected! Please review the findings.")
+        print("📄 Check the detailed PDF report in the 'security-reports' branch for comprehensive analysis.")
         # Don't exit with error code as this might block the workflow
         # exit(1)
     else:
